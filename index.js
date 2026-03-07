@@ -10,7 +10,12 @@ const PORT = process.env.PORT || 3000;
 
 // --- MIDDLEWARE ---
 app.use(express.json()); 
-app.use(express.static(path.join(__dirname, 'public')));
+
+// Explicitly serve your HTML files from the main directory
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/:page.html', (req, res) => {
+  res.sendFile(path.join(__dirname, req.params.page + '.html'));
+});
 
 // --- SESSION SETUP ---
 app.use(session({
