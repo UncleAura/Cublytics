@@ -1,48 +1,53 @@
 const express = require('express');
 const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
+const { createClient } = require('@libsql/client'); // UPDATED: Turso client
 const bcrypt = require('bcryptjs');
 const session = require('express-session');
 
 const app = express();
-const PORT = 3000;
+// Let Render assign the port, or default to 3000
+const PORT = process.env.PORT || 3000;
 
 // --- MIDDLEWARE ---
 app.use(express.json()); 
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- SESSION SETUP ---
-// This creates the "VIP wristband" cookie for logged-in users
 app.use(session({
   secret: 'super-secret-cublytics-key', 
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false } // Set to true if deploying with HTTPS
+  cookie: { secure: false } 
 }));
 
-// --- 1. DATABASE SETUP ---
-const db = new sqlite3.Database('./cublytics.db', (err) => {
-  if (err) console.error(err.message);
-  console.log('Connected to the SQLite database.');
+// --- 1. DATABASE SETUP (CLOUD TURSO) ---
+// This automatically pulls the keys you saved in Render's Environment Variables!
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN,
 });
 
-// Create the users table if it doesn't exist
-db.run(`CREATE TABLE IF NOT EXISTS users (
+// Create the users table if it doesn't exist (using modern Promises)
+db.execute(`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE,
   password TEXT,
   wca_id TEXT
-)`);
+)`).then(() => {
+  console.log('Connected to the Turso cloud database.');
+}).catch((err) => {
+  console.error('Failed to connect to Turso or create table:', err.message);
+});
+
 
 // --- 2. API ROUTES ---
 
-// NEW: Fetch Official WCA Profile & PRs
+// Fetch Official WCA Profile & PRs
 app.get('/api/cuber', async (req, res) => {
   const wcaId = req.query.id;
   if (!wcaId) return res.status(400).json({ error: "No WCA ID provided" });
 
   try {
-    // Fetch live data directly from the official WCA API
     const wcaResponse = await fetch(`https://www.worldcubeassociation.org/api/v0/persons/${wcaId}`);
 
     if (!wcaResponse.ok) {
@@ -51,7 +56,6 @@ app.get('/api/cuber', async (req, res) => {
 
     const wcaData = await wcaResponse.json();
 
-    // Format the data so your frontend can read it easily
     res.json({
       wca_id: wcaData.person.wca_id,
       name: wcaData.person.name,
@@ -66,25 +70,23 @@ app.get('/api/cuber', async (req, res) => {
   }
 });
 
-// UPDATED: Fetch local database history (now includes individual solves & chronological order)
-app.get('/api/history', (req, res) => {
+// Fetch cloud database history
+app.get('/api/history', async (req, res) => {
   const wcaId = req.query.id;
   if (!wcaId) return res.status(400).json({ error: "No WCA ID provided" });
 
-  // Notice: Added value1 through value5, and changed ORDER BY to ASC for chronological sorting
   const query = `SELECT competition_id, event_id, round_type_id, pos, best, average, value1, value2, value3, value4, value5 FROM wca_results WHERE person_id = ? ORDER BY competition_id ASC`;
 
-  db.all(query, [wcaId], (err, rows) => {
-    if (err) {
-        console.error("Database query error:", err);
-        return res.status(500).json({ error: "Database error" });
-    }
+  try {
+    // UPDATED: Turso uses await db.execute() instead of db.all()
+    const result = await db.execute({ sql: query, args: [wcaId] });
+    const rows = result.rows;
+
     if (!rows || rows.length === 0) return res.json({ stats: { solves: 0, gold: 0, silver: 0, bronze: 0 }, results: [] });
 
     let gold = 0, silver = 0, bronze = 0;
 
     rows.forEach(row => {
-      // Tally medals (finals typically have round_type_id 'c' or 'f')
       if (row.round_type_id === 'c' || row.round_type_id === 'f') {
         if (row.pos == 1) gold++;
         if (row.pos == 2) silver++;
@@ -93,8 +95,12 @@ app.get('/api/history', (req, res) => {
     });
 
     res.json({ stats: { solves: rows.length, gold, silver, bronze }, results: rows });
-  });
+  } catch (err) {
+    console.error("Database query error:", err);
+    return res.status(500).json({ error: "Database error" });
+  }
 });
+
 
 // --- 3. AUTHENTICATION & SESSION ROUTES ---
 
@@ -110,27 +116,29 @@ app.post('/api/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const query = `INSERT INTO users (username, password, wca_id) VALUES (?, ?, ?)`;
 
-    db.run(query, [username, hashedPassword, wcaId], function(err) {
-      if (err) {
-        if (err.message.includes("UNIQUE")) {
-          return res.status(400).json({ error: "Username is already taken." });
-        }
-        return res.status(500).json({ error: "Database error." });
-      }
-      res.json({ message: "Account created successfully! You can now log in." });
-    });
+    // UPDATED: Turso uses await db.execute() instead of db.run()
+    await db.execute({ sql: query, args: [username, hashedPassword, wcaId] });
+    
+    res.json({ message: "Account created successfully! You can now log in." });
   } catch (error) {
+    if (error.message && (error.message.includes("UNIQUE") || error.message.includes("constraint failed"))) {
+      return res.status(400).json({ error: "Username is already taken." });
+    }
+    console.error("Signup error:", error);
     res.status(500).json({ error: "Server error during signup." });
   }
 });
 
 // Log In
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   const query = `SELECT * FROM users WHERE username = ?`;
-  db.get(query, [username], async (err, user) => {
-    if (err) return res.status(500).json({ error: "Database error." });
+  
+  try {
+    // UPDATED: Turso uses await db.execute() instead of db.get()
+    const result = await db.execute({ sql: query, args: [username] });
+    const user = result.rows[0]; // Grab the first user that matches
 
     if (!user) {
       return res.status(400).json({ error: "Invalid username or password." });
@@ -141,14 +149,16 @@ app.post('/api/login', (req, res) => {
       return res.status(400).json({ error: "Invalid username or password." });
     }
 
-    // Save the user info to their session cookie!
     req.session.user = {
       username: user.username,
       wcaId: user.wca_id
     };
 
     res.json({ message: "Login successful!", wcaId: user.wca_id });
-  });
+  } catch (err) {
+    console.error("Login Error:", err);
+    return res.status(500).json({ error: "Database error." });
+  }
 });
 
 // Check who is logged in
