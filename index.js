@@ -55,19 +55,14 @@ app.get('/api/history', async (req, res) => {
   // Note: Removed value1-value5 since they aren't in your Results schema.
   const query = `
     SELECT 
-      r.competition_id AS competitionId, 
-      c.name AS competition_name,
-      r.event_id AS eventId, 
-      r.round_type_id AS roundTypeId, 
-      r.pos, 
-      r.best, 
-      r.average, 
-      r.regional_single_record AS regionalSingleRecord,
-      r.regional_average_record AS regionalAverageRecord
-    FROM Results r
-    LEFT JOIN Competitions c ON r.competition_id = c.id
-    WHERE r.person_id = ? 
-    ORDER BY c.year ASC, c.month ASC, c.day ASC
+      competition_id AS competitionId, 
+      event_id AS eventId, 
+      round_type_id AS roundTypeId, 
+      pos, 
+      best, 
+      average
+    FROM Results
+    WHERE person_id = ? 
   `;
 
   try {
