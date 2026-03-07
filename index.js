@@ -45,25 +45,50 @@ db.execute(`CREATE TABLE IF NOT EXISTS users (
 
 // --- 2. API ROUTES ---
 
-// Fetch Official WCA Profile
-app.get('/api/cuber', async (req, res) => {
+// Fetch cloud database history (OFFICIAL WCA DATA)
+app.get('/api/history', async (req, res) => {
   const wcaId = req.query.id;
   if (!wcaId) return res.status(400).json({ error: "No WCA ID provided" });
 
+  // Look at this beauty! We are asking for Solves 1-5, PR records, and joining the Competitions table for the pretty names!
+  const query = `
+    SELECT 
+      r.competitionId, 
+      c.name AS competition_name,
+      r.eventId, 
+      r.roundTypeId, 
+      r.pos, 
+      r.best, 
+      r.average, 
+      r.value1, r.value2, r.value3, r.value4, r.value5,
+      r.regionalSingleRecord,
+      r.regionalAverageRecord
+    FROM Results r
+    LEFT JOIN Competitions c ON r.competitionId = c.id
+    WHERE r.personId = ? 
+    ORDER BY c.year ASC, c.month ASC, c.day ASC
+  `;
+
   try {
-    const wcaResponse = await fetch(`https://www.worldcubeassociation.org/api/v0/persons/${wcaId}`);
-    if (!wcaResponse.ok) return res.status(404).json({ error: "WCA ID not found." });
-    
-    const wcaData = await wcaResponse.json();
-    res.json({
-      wca_id: wcaData.person.wca_id,
-      name: wcaData.person.name,
-      country: wcaData.person.country_iso2,
-      avatar: wcaData.person.avatar.url || 'https://www.worldcubeassociation.org/assets/missing_avatar_thumb-12654dd6f1aa6d458e80d02d6fb8b440965e6d6af031f0eb11a2f9602058b883.png',
-      records: wcaData.personal_records
+    const result = await db.execute({ sql: query, args: [wcaId] });
+    const rows = result.rows;
+
+    if (!rows || rows.length === 0) return res.json({ stats: { solves: 0, gold: 0, silver: 0, bronze: 0 }, results: [] });
+
+    let gold = 0, silver = 0, bronze = 0;
+    rows.forEach(row => {
+      // WCA uses camelCase now (roundTypeId instead of round_type_id)
+      if (row.roundTypeId === 'c' || row.roundTypeId === 'f') {
+        if (row.pos == 1) gold++;
+        if (row.pos == 2) silver++;
+        if (row.pos == 3) bronze++;
+      }
     });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch data from WCA." });
+
+    res.json({ stats: { solves: rows.length, gold, silver, bronze }, results: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
   }
 });
 
