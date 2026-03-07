@@ -50,22 +50,23 @@ app.get('/api/history', async (req, res) => {
   const wcaId = req.query.id;
   if (!wcaId) return res.status(400).json({ error: "No WCA ID provided" });
 
-  // Look at this beauty! We are asking for Solves 1-5, PR records, and joining the Competitions table for the pretty names!
+  // Look at this beauty! We use 'AS' to map your Turso snake_case columns
+  // into the camelCase names your frontend expects.
+  // Note: Removed value1-value5 since they aren't in your Results schema.
   const query = `
     SELECT 
-      r.competitionId, 
+      r.competition_id AS competitionId, 
       c.name AS competition_name,
-      r.eventId, 
-      r.roundTypeId, 
+      r.event_id AS eventId, 
+      r.round_type_id AS roundTypeId, 
       r.pos, 
       r.best, 
       r.average, 
-      r.value1, r.value2, r.value3, r.value4, r.value5,
-      r.regionalSingleRecord,
-      r.regionalAverageRecord
+      r.regional_single_record AS regionalSingleRecord,
+      r.regional_average_record AS regionalAverageRecord
     FROM Results r
-    LEFT JOIN Competitions c ON r.competitionId = c.id
-    WHERE r.personId = ? 
+    LEFT JOIN Competitions c ON r.competition_id = c.id
+    WHERE r.person_id = ? 
     ORDER BY c.year ASC, c.month ASC, c.day ASC
   `;
 
@@ -73,11 +74,13 @@ app.get('/api/history', async (req, res) => {
     const result = await db.execute({ sql: query, args: [wcaId] });
     const rows = result.rows;
 
-    if (!rows || rows.length === 0) return res.json({ stats: { solves: 0, gold: 0, silver: 0, bronze: 0 }, results: [] });
+    if (!rows || rows.length === 0) {
+      return res.json({ stats: { solves: 0, gold: 0, silver: 0, bronze: 0 }, results: [] });
+    }
 
     let gold = 0, silver = 0, bronze = 0;
     rows.forEach(row => {
-      // WCA uses camelCase now (roundTypeId instead of round_type_id)
+      // Because we used 'AS roundTypeId' in the SQL query, this loop works perfectly!
       if (row.roundTypeId === 'c' || row.roundTypeId === 'f') {
         if (row.pos == 1) gold++;
         if (row.pos == 2) silver++;
@@ -87,36 +90,7 @@ app.get('/api/history', async (req, res) => {
 
     res.json({ stats: { solves: rows.length, gold, silver, bronze }, results: rows });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-// Fetch cloud database history
-app.get('/api/history', async (req, res) => {
-  const wcaId = req.query.id;
-  if (!wcaId) return res.status(400).json({ error: "No WCA ID provided" });
-
-  // FIXED: Removed value1 through value5 since they don't exist in your schema
-  const query = `SELECT competition_id, event_id, round_type_id, pos, best, average FROM wca_results WHERE person_id = ? ORDER BY competition_id ASC`;
-
-  try {
-    const result = await db.execute({ sql: query, args: [wcaId] });
-    const rows = result.rows;
-
-    if (!rows || rows.length === 0) return res.json({ stats: { solves: 0, gold: 0, silver: 0, bronze: 0 }, results: [] });
-
-    let gold = 0, silver = 0, bronze = 0;
-    rows.forEach(row => {
-      if (row.round_type_id === 'c' || row.round_type_id === 'f') {
-        if (row.pos == 1) gold++;
-        if (row.pos == 2) silver++;
-        if (row.pos == 3) bronze++;
-      }
-    });
-
-    res.json({ stats: { solves: rows.length, gold, silver, bronze }, results: rows });
-  } catch (err) {
+    console.error("History Route Error:", err);
     res.status(500).json({ error: "Database error" });
   }
 });
