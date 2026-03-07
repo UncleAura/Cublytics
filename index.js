@@ -72,7 +72,8 @@ app.get('/api/history', async (req, res) => {
   const wcaId = req.query.id;
   if (!wcaId) return res.status(400).json({ error: "No WCA ID provided" });
 
-  const query = `SELECT competition_id, event_id, round_type_id, pos, best, average, value1, value2, value3, value4, value5 FROM wca_results WHERE person_id = ? ORDER BY competition_id ASC`;
+  // FIXED: Removed value1 through value5 since they don't exist in your schema
+  const query = `SELECT competition_id, event_id, round_type_id, pos, best, average FROM wca_results WHERE person_id = ? ORDER BY competition_id ASC`;
 
   try {
     const result = await db.execute({ sql: query, args: [wcaId] });
