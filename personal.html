@@ -60,10 +60,6 @@
       try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(iso) || iso; } catch (e) { return iso; }
     }
 
-    function formatCompId(id) {
-      return id.replace(/([a-z])([A-Z0-9])/g, '$1 $2');
-    }
-
     function formatTime(eventId, amount, isAverage = false) {
       if (amount === -1) return 'DNF';
       if (amount === -2) return 'DNS';
@@ -152,7 +148,7 @@
           console.warn("Comp count fetch failed, likely rate limited."); 
         }
 
-        // 3. Fetch Local DB Stats (Handling Replit Cold Starts)
+        // 3. Fetch Local DB Stats
         let dbStats = { solves: 0, gold: 0, silver: 0, bronze: 0 };
         let historyResults = [];
         try {
@@ -210,9 +206,6 @@
       const data = currentWcaData;
       const dbStats = currentHistData.stats;
 
-      const competedEventIds = [...new Set(currentHistData.results.map(r => r.event_id))];
-      const selectedEventFilter = document.getElementById('eventFilter') ? document.getElementById('eventFilter').value : 'all';
-
       // 1. Build PR Table
       let prRows = '';
       wcaEvents.forEach(ev => {
@@ -244,36 +237,44 @@
       });
       if (!prRows) prRows = '<tr><td colspan="7" class="p-4 text-center text-slate-400">No official results found.</td></tr>';
 
-      // 2. Build History Table
+      // 2. Build History Table (Using all results, dropdown removed)
       let historyRows = '';
-      const filteredResults = selectedEventFilter === 'all' 
-        ? currentHistData.results 
-        : currentHistData.results.filter(r => r.event_id === selectedEventFilter);
-
-      if (filteredResults.length > 0) {
-        filteredResults.forEach(res => {
-          const isSinglePR = data.records[res.event_id]?.single?.best === res.best;
-          const isAvgPR = data.records[res.event_id]?.average?.best === res.average;
-
-          const solves = [res.value1, res.value2, res.value3, res.value4, res.value5]
-            .filter(v => v !== undefined && v !== 0)
-            .map(v => formatTime(res.event_id, v, false))
-            .join(', ');
+      if (currentHistData.results.length > 0) {
+        currentHistData.results.forEach(res => {
+          
+          // Check for PR/NR/WR directly from the new database columns
+          const isSingleRecord = res.regionalSingleRecord ? true : false;
+          const isAvgRecord = res.regionalAverageRecord ? true : false;
+          
+          // Generate the labels (e.g., 'PR', 'NR')
+          const singleRecordLabel = isSingleRecord ? `<span class="ml-1 text-[10px] uppercase font-black tracking-wider">${res.regionalSingleRecord}</span>` : '';
+          const avgRecordLabel = isAvgRecord ? `<span class="ml-1 text-[10px] uppercase font-black tracking-wider">${res.regionalAverageRecord}</span>` : '';
 
           historyRows += `
-            <tr class="hover:bg-slate-700/50 transition-colors border-b border-slate-700/50 text-sm">
-              <td class="p-3">${formatCompId(res.competition_id)}</td>
-              <td class="p-3 font-semibold text-white">${eventNames[res.event_id] || res.event_id}</td>
-              <td class="p-3 text-slate-400">${roundNames[res.round_type_id] || res.round_type_id}</td>
+            <tr class="hover:bg-slate-700/50 transition-colors border-b border-slate-700/50 text-sm whitespace-nowrap">
+              <td class="p-3 pl-4 text-white font-medium">${res.competition_name}</td>
+              <td class="p-3 text-slate-400">${roundNames[res.roundTypeId] || res.roundTypeId}</td>
               <td class="p-3">${res.pos}</td>
-              <td class="p-3 text-slate-300 italic text-xs">${solves || '-'}</td>
-              <td class="p-3 ${isSinglePR ? 'text-yellow-400 font-bold bg-yellow-900/20' : 'text-emerald-400'}">${formatTime(res.event_id, res.best, false)}</td>
-              <td class="p-3 ${isAvgPR ? 'text-yellow-400 font-bold bg-yellow-900/20' : 'text-blue-400'}">${formatTime(res.event_id, res.average, true)}</td>
+              <td class="p-3 text-slate-300 text-center">${formatTime(res.eventId, res.value1, false)}</td>
+              <td class="p-3 text-slate-300 text-center">${formatTime(res.eventId, res.value2, false)}</td>
+              <td class="p-3 text-slate-300 text-center">${formatTime(res.eventId, res.value3, false)}</td>
+              <td class="p-3 text-slate-300 text-center">${formatTime(res.eventId, res.value4, false)}</td>
+              <td class="p-3 text-slate-300 text-center">${formatTime(res.eventId, res.value5, false)}</td>
+              <td class="p-3 text-center">
+                <div class="${isSingleRecord ? 'bg-yellow-500 text-slate-900 px-2 py-1 rounded font-bold inline-block shadow' : 'text-emerald-400'}">
+                  ${formatTime(res.eventId, res.best, false)} ${singleRecordLabel}
+                </div>
+              </td>
+              <td class="p-3 text-center">
+                <div class="${isAvgRecord ? 'bg-yellow-500 text-slate-900 px-2 py-1 rounded font-bold inline-block shadow' : 'text-blue-400'}">
+                  ${formatTime(res.eventId, res.average, true)} ${avgRecordLabel}
+                </div>
+              </td>
             </tr>
           `;
         });
       } else {
-        historyRows = '<tr><td colspan="7" class="p-4 text-center text-slate-500">No competition history found for this event.</td></tr>';
+        historyRows = '<tr><td colspan="10" class="p-4 text-center text-slate-500">No competition history found.</td></tr>';
       }
 
       // 3. Render Dashboard
@@ -354,22 +355,21 @@
           <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg w-full mb-8">
             <div class="bg-slate-900 p-4 border-b border-slate-700 flex justify-between items-center">
               <h4 class="text-lg font-bold text-white">Competition Results</h4>
-              <select id="eventFilter" class="bg-slate-800 text-sm text-white border border-slate-600 rounded px-3 py-1 outline-none">
-                <option value="all">All Events</option>
-                ${competedEventIds.map(id => `<option value="${id}" ${selectedEventFilter === id ? 'selected' : ''}>${eventNames[id] || id}</option>`).join('')}
-              </select>
             </div>
-            <div class="p-0 text-slate-400 text-sm overflow-x-auto">
-              <table class="w-full text-left border-collapse min-w-[800px]">
+            <div class="p-0 text-slate-400 text-sm overflow-x-auto w-full">
+              <table class="w-full text-left border-collapse min-w-[1000px]">
                 <thead>
                   <tr class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700">
                     <th class="p-3 font-semibold pl-4">Competition</th>
-                    <th class="p-3 font-semibold">Event</th>
                     <th class="p-3 font-semibold">Round</th>
                     <th class="p-3 font-semibold">Pos</th>
-                    <th class="p-3 font-semibold">Solves</th>
-                    <th class="p-3 font-semibold text-emerald-400">Best</th>
-                    <th class="p-3 font-semibold text-blue-400">Average</th>
+                    <th class="p-3 font-semibold text-center">1</th>
+                    <th class="p-3 font-semibold text-center">2</th>
+                    <th class="p-3 font-semibold text-center">3</th>
+                    <th class="p-3 font-semibold text-center">4</th>
+                    <th class="p-3 font-semibold text-center">5</th>
+                    <th class="p-3 font-semibold text-center text-emerald-400">Best</th>
+                    <th class="p-3 font-semibold text-center text-blue-400">Average</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -382,12 +382,9 @@
         </div>
       `;
 
+      // Re-attach rank toggle listener
       document.getElementById('rankToggle').addEventListener('change', (e) => {
         rankMode = e.target.value;
-        renderUI();
-      });
-
-      document.getElementById('eventFilter').addEventListener('change', () => {
         renderUI();
       });
     }
