@@ -53,7 +53,7 @@ app.get('/api/history', async (req, res) => {
   // Look at this beauty! We use 'AS' to map your Turso snake_case columns
   // into the camelCase names your frontend expects.
   // Note: Removed value1-value5 since they aren't in your Results schema.
-  cconst query = `
+  const query = `
     SELECT 
       r.competition_id AS competitionId, 
       c.name AS competition_name,
