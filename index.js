@@ -62,15 +62,20 @@ app.get('/api/history', async (req, res) => {
       r.pos, 
       r.best, 
       r.average, 
-      0 AS value1, 0 AS value2, 0 AS value3, 0 AS value4, 0 AS value5,
+      MAX(CASE WHEN a.attempt_number = 1 THEN a.value ELSE 0 END) AS value1,
+      MAX(CASE WHEN a.attempt_number = 2 THEN a.value ELSE 0 END) AS value2,
+      MAX(CASE WHEN a.attempt_number = 3 THEN a.value ELSE 0 END) AS value3,
+      MAX(CASE WHEN a.attempt_number = 4 THEN a.value ELSE 0 END) AS value4,
+      MAX(CASE WHEN a.attempt_number = 5 THEN a.value ELSE 0 END) AS value5,
       IFNULL(r.regional_single_record, '') AS regionalSingleRecord,
       IFNULL(r.regional_average_record, '') AS regionalAverageRecord
     FROM Results r
     LEFT JOIN Competitions c ON r.competition_id = c.id
+    LEFT JOIN result_attempts a ON r.id = a.result_id
     WHERE r.person_id = ? 
+    GROUP BY r.id
     ORDER BY c.year ASC, c.month ASC, c.day ASC
   `;
-
   try {
     const result = await db.execute({ sql: query, args: [wcaId] });
     const rows = result.rows;
