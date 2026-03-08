@@ -56,15 +56,15 @@ app.get('/api/history', async (req, res) => {
   const query = `
     SELECT 
       r.competition_id AS competitionId, 
-      c.name AS competition_name,
+      c.name AS competitionName,
       r.event_id AS eventId, 
       r.round_type_id AS roundTypeId, 
       r.pos, 
       r.best, 
       r.average, 
       0 AS value1, 0 AS value2, 0 AS value3, 0 AS value4, 0 AS value5,
-      r.regional_single_record AS regionalSingleRecord,
-      r.regional_average_record AS regionalAverageRecord
+      IFNULL(r.regional_single_record, '') AS regionalSingleRecord,
+      IFNULL(r.regional_average_record, '') AS regionalAverageRecord
     FROM Results r
     LEFT JOIN Competitions c ON r.competition_id = c.id
     WHERE r.person_id = ? 
