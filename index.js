@@ -62,7 +62,7 @@ app.get('/api/history', async (req, res) => {
       r.pos, 
       r.best, 
       r.average, 
-      r.value1, r.value2, r.value3, r.value4, r.value5,
+      0 AS value1, 0 AS value2, 0 AS value3, 0 AS value4, 0 AS value5,
       r.regional_single_record AS regionalSingleRecord,
       r.regional_average_record AS regionalAverageRecord
     FROM Results r
