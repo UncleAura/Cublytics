@@ -1689,3 +1689,11 @@ function TimerWithFmc({ user, solves, setSolves }) {
 
   return <TimerPage user={user} solves={solves} setSolves={setSolves} eventId_={eventId} setEventId_={setEventId} />;
 }
+import { createRoot } from 'react-dom/client';
+
+// This finds the "root" div in your index.html and injects your app there
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  root.render(<Cublytics />); // <--- MAKE SURE THIS MATCHES YOUR FUNCTION NAME
+}
