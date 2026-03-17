@@ -1,5 +1,5 @@
 require('dotenv').config();
-
+ 
 // Polyfill fetch for Node < 18 (Render may use older Node)
 if (!globalThis.fetch) {
   const { default: nodeFetch, Headers, Request, Response } = require('node-fetch');
@@ -8,7 +8,7 @@ if (!globalThis.fetch) {
   globalThis.Request  = Request;
   globalThis.Response = Response;
 }
-
+ 
 const express  = require('express');
 const Database = require('better-sqlite3');
 const bcrypt   = require('bcryptjs');
@@ -16,18 +16,32 @@ const jwt      = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto   = require('crypto');
 const path     = require('path');
-
+ 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'cublytics_dev_secret_change_in_prod';
 const BASE_URL   = process.env.BASE_URL   || `https://cublytics.onrender.com`;
-
-app.use(express.json({ limit: '50mb' }));  // needs to be large for base64 video frames
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Health check — keeps Render free tier awake and lets frontend detect server
+ 
+app.use(express.json({ limit: '50mb' }));
+ 
+// Serve static files from the public directory
+const publicDir = path.join(__dirname, 'public');
+app.use(express.static(publicDir));
+ 
+// Health check
 app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
-
+ 
+// Explicit root route as fallback — ensures / always serves index.html
+app.get('/', (req, res) => {
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
+ 
+// Catch-all: any non-API route serves index.html (handles client-side routing)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
+ 
 // ══════════════════════════════════════
 //  DATABASE SETUP
 // ══════════════════════════════════════
@@ -42,7 +56,7 @@ try {
   console.error('On Render: clear the build cache and redeploy, or set NODE_VERSION=18 in environment.');
   process.exit(1);
 }
-
+ 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +70,7 @@ db.exec(`
     color_scheme  TEXT    DEFAULT '{}',
     created_at    INTEGER DEFAULT (strftime('%s','now'))
   );
-
+ 
   CREATE TABLE IF NOT EXISTS sessions (
     id       TEXT    PRIMARY KEY,
     user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -65,7 +79,7 @@ db.exec(`
     date     TEXT    NOT NULL,
     source   TEXT    DEFAULT 'cublytics'
   );
-
+ 
   CREATE TABLE IF NOT EXISTS solves (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -76,11 +90,11 @@ db.exec(`
     date        INTEGER DEFAULT (strftime('%s','now')),
     segments    TEXT    DEFAULT '[]'
   );
-
+ 
   CREATE INDEX IF NOT EXISTS idx_sessions_user   ON sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_solves_session  ON solves(session_id);
 `);
-
+ 
 // ══════════════════════════════════════
 //  EMAIL
 // ══════════════════════════════════════
@@ -90,7 +104,7 @@ const mailer = nodemailer.createTransport({
   secure: process.env.SMTP_SECURE === 'true',
   auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
 });
-
+ 
 async function sendVerificationEmail(to, token) {
   const link = `${BASE_URL}/?token=${token}`;
   const from = process.env.SMTP_FROM || 'noreply@cublytics.app';
@@ -130,7 +144,7 @@ async function sendVerificationEmail(to, token) {
 </html>`
   });
 }
-
+ 
 // ══════════════════════════════════════
 //  AUTH MIDDLEWARE
 // ══════════════════════════════════════
@@ -142,28 +156,28 @@ function requireAuth(req, res, next) {
     next();
   } catch { res.status(401).json({ error: 'Token invalid or expired' }); }
 }
-
+ 
 // ══════════════════════════════════════
 //  AUTH ROUTES
 // ══════════════════════════════════════
-
+ 
 // Register
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, display_name, wca_id } = req.body;
   if (!email || !password)   return res.status(400).json({ error: 'Email and password are required.' });
   if (password.length < 8)   return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   if (!/\S+@\S+\.\S+/.test(email)) return res.status(400).json({ error: 'Invalid email address.' });
-
+ 
   try {
     const hash    = await bcrypt.hash(password, 12);
     const token   = crypto.randomBytes(32).toString('hex');
     const expires = Date.now() + 86_400_000; // 24h
-
+ 
     db.prepare(`
       INSERT INTO users (email, password_hash, display_name, wca_id, verify_token, verify_expires)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(email.toLowerCase().trim(), hash, display_name || null, wca_id?.toUpperCase() || null, token, expires);
-
+ 
     if (process.env.SMTP_USER) {
       await sendVerificationEmail(email, token);
       return res.json({ message: 'Account created. A verification link has been sent to your email.' });
@@ -178,7 +192,7 @@ app.post('/api/auth/register', async (req, res) => {
     res.status(500).json({ error: 'Registration failed. Please try again.' });
   }
 });
-
+ 
 // Verify email
 app.get('/api/auth/verify', (req, res) => {
   const { token } = req.query;
@@ -191,7 +205,7 @@ app.get('/api/auth/verify', (req, res) => {
   db.prepare('UPDATE users SET verified = 1, verify_token = NULL, verify_expires = NULL WHERE id = ?').run(user.id);
   res.json({ message: 'Email verified successfully. You can now log in.' });
 });
-
+ 
 // Login
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
@@ -204,14 +218,14 @@ app.post('/api/auth/login', async (req, res) => {
   const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
   res.json({ token, user: { id: user.id, email: user.email, display_name: user.display_name, wca_id: user.wca_id, color_scheme: JSON.parse(user.color_scheme || '{}') } });
 });
-
+ 
 // Current user
 app.get('/api/auth/me', requireAuth, (req, res) => {
   const u = db.prepare('SELECT id,email,display_name,wca_id,color_scheme FROM users WHERE id=?').get(req.user.id);
   if (!u) return res.status(404).json({ error: 'User not found.' });
   res.json({ ...u, color_scheme: JSON.parse(u.color_scheme || '{}') });
 });
-
+ 
 // Update profile
 app.patch('/api/auth/me', requireAuth, (req, res) => {
   const { display_name, wca_id, color_scheme } = req.body;
@@ -219,14 +233,14 @@ app.patch('/api/auth/me', requireAuth, (req, res) => {
     .run(display_name||null, wca_id?.toUpperCase()||null, JSON.stringify(color_scheme||{}), req.user.id);
   res.json({ ok: true });
 });
-
+ 
 // ══════════════════════════════════════
 //  SESSIONS
 // ══════════════════════════════════════
 app.get('/api/sessions', requireAuth, (req, res) => {
   res.json(db.prepare('SELECT * FROM sessions WHERE user_id=? ORDER BY date DESC').all(req.user.id));
 });
-
+ 
 app.post('/api/sessions', requireAuth, (req, res) => {
   const { id, name, event, date, source } = req.body;
   try {
@@ -235,14 +249,14 @@ app.post('/api/sessions', requireAuth, (req, res) => {
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
+ 
 app.delete('/api/sessions/:id', requireAuth, (req, res) => {
   const s = db.prepare('SELECT id FROM sessions WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!s) return res.status(404).json({ error: 'Not found.' });
   db.prepare('DELETE FROM sessions WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 });
-
+ 
 // ══════════════════════════════════════
 //  SOLVES
 // ══════════════════════════════════════
@@ -252,7 +266,7 @@ app.get('/api/sessions/:id/solves', requireAuth, (req, res) => {
   const rows = db.prepare('SELECT * FROM solves WHERE session_id=? ORDER BY id ASC').all(req.params.id);
   res.json(rows.map(r => ({ ...r, time: r.time >= 999999 ? Infinity : r.time, segments: JSON.parse(r.segments||'[]') })));
 });
-
+ 
 app.post('/api/sessions/:id/solves', requireAuth, (req, res) => {
   const s = db.prepare('SELECT id FROM sessions WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
   if (!s) return res.status(404).json({ error: 'Not found.' });
@@ -262,23 +276,23 @@ app.post('/api/sessions/:id/solves', requireAuth, (req, res) => {
   ).run(req.params.id, time===Infinity?999999:time, display, scramble||'', comment||'', date||Date.now(), JSON.stringify(segments||[]));
   res.json({ id: r.lastInsertRowid });
 });
-
+ 
 app.delete('/api/sessions/:sessionId/solves/:id', requireAuth, (req, res) => {
   db.prepare(`DELETE FROM solves WHERE id=? AND session_id IN
     (SELECT id FROM sessions WHERE user_id=?)`).run(req.params.id, req.user.id);
   res.json({ ok: true });
 });
-
+ 
 // ══════════════════════════════════════
 //  BULK SYNC  (offline → server)
 // ══════════════════════════════════════
 app.post('/api/sync', requireAuth, (req, res) => {
   const { sessions: incoming } = req.body;
   if (!Array.isArray(incoming)) return res.status(400).json({ error: 'Invalid payload.' });
-
+ 
   const iSess  = db.prepare('INSERT OR IGNORE INTO sessions (id,user_id,name,event,date,source) VALUES (?,?,?,?,?,?)');
   const iSolve = db.prepare('INSERT INTO solves (session_id,time,display,scramble,comment,date,segments) VALUES (?,?,?,?,?,?,?)');
-
+ 
   const tx = db.transaction(() => {
     let as=0, av=0;
     for (const s of incoming) {
@@ -293,10 +307,10 @@ app.post('/api/sync', requireAuth, (req, res) => {
     }
     return { addedSessions:as, addedSolves:av };
   });
-
+ 
   res.json(tx());
 });
-
+ 
 // ══════════════════════════════════════
 //  AI PROXY  — forwards to Anthropic
 //  Keeps the API key server-side only.
@@ -307,11 +321,11 @@ app.post('/api/sync', requireAuth, (req, res) => {
 app.post('/api/ai', async (req, res) => {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return res.status(503).json({ error: 'AI features are not configured on this server. Add ANTHROPIC_API_KEY to your environment variables.' });
-
+ 
   const { system, messages, max_tokens = 600 } = req.body;
   if (!Array.isArray(messages) || !messages.length)
     return res.status(400).json({ error: 'messages array required' });
-
+ 
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -339,11 +353,13 @@ app.post('/api/ai', async (req, res) => {
     res.status(500).json({ error: 'AI request failed: ' + e.message });
   }
 });
-
+ 
 app.listen(PORT, () => {
   console.log(`\n  Cublytics running at http://localhost:${PORT}`);
-  console.log(`  Database: ${process.env.DB_PATH||'cublytics.db'}`);
-  if (!process.env.SMTP_USER)      console.log(`  Note: SMTP not configured — email verification auto-skipped.`);
-  if (!process.env.ANTHROPIC_API_KEY) console.log(`  Note: ANTHROPIC_API_KEY not set — AI features will be unavailable.`);
+  console.log(`  Serving static files from: ${publicDir}`);
+  console.log(`  Database: ${process.env.DB_PATH || 'cublytics.db'}`);
+  if (!process.env.SMTP_USER)         console.log(`  Note: SMTP not configured — email verification auto-skipped.`);
+  if (!process.env.ANTHROPIC_API_KEY) console.log(`  Note: ANTHROPIC_API_KEY not set — AI features unavailable.`);
   console.log();
 });
+ 
