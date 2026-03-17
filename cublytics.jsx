@@ -1695,5 +1695,5 @@ import { createRoot } from 'react-dom/client';
 const container = document.getElementById('root');
 if (container) {
   const root = createRoot(container);
-  root.render(<Cublytics />); // <--- MAKE SURE THIS MATCHES YOUR FUNCTION NAME
+  root.render(<App />); // <--- MAKE SURE THIS MATCHES YOUR FUNCTION NAME
 }
